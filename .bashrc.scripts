@@ -1,0 +1,101 @@
+function listdeps {
+  mvn dependency:list | grep '\[INFO\]    ' | sed 's/\[INFO\]    //g' | grep -e '.*[:].*[:].*[:]' | sort | uniq| awk -F':' '{print "<dependency>" "\n" "\t<groupId>" $0 "</groupId>" "\n" "\t<artifactId>" $2 "</artifactId>" "\n" "\t<version>" $4 "</version>" "\n" "</dependency>" }'
+}
+
+function shorten {
+  arr=$1
+  parts=( ${i//:/ } )
+  unset parts[${#parts[@]}-1]
+  return $parts
+}
+
+function get_deps() {
+  deps=( `mvn dependency:list | grep '\[INFO\]    ' | sed 's/\[INFO\]    //g' | grep -e '.*[:].*[:].*[:]' | sort | uniq | awk -F':' 'NF{OFS=":";NF-=1};1' | sort | uniq` )
+}
+
+function print_deps() {
+  get_deps
+  for i in ${deps[@]}; do echo $i; done
+}
+
+
+
+function build_dep_pom() {
+
+outdir=$1
+if [[ ! -e $outdir ]]; then
+  mkdir -p $outdir
+fi
+
+outpom="${outdir}/pom.xml"
+
+if [[ -e $outpom ]]; then
+  echo "Error: $outpom already exists" 1>&2
+  return
+fi
+
+get_deps
+
+cat >> "${outpom}" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <name>dep-builder</name>
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>jah.deps</groupId>
+  <artifactId>depbuild</artifactId>
+  <packaging>pom</packaging>
+  <version>1.0.0</version>
+
+  <dependencies>
+EOF
+
+for dep in ${deps[@]}; do 
+parts=(${dep//:/ })
+len=${#parts[@]}
+
+if [[ $len -eq 4 && "${parts[2]}" = "jar" ]]; then
+cat >> "${outpom}" << EOF
+    <dependency>
+      <groupId>${parts[0]}</groupId>
+      <artifactId>${parts[1]}</artifactId>
+      <version>${parts[3]}</version>
+    </dependency>
+EOF
+
+elif [[ $len -eq 4 && "${parts[2]}" != "jar" ]]; then
+cat >> "${outpom}" << EOF
+    <dependency>
+      <groupId>${parts[0]}</groupId>
+      <artifactId>${parts[1]}</artifactId>
+      <type>${parts[2]}</type>
+      <version>${parts[3]}</version>
+    </dependency>
+EOF
+
+elif [[ $len -eq 5 ]]; then
+cat >> "${outpom}" << EOF
+    <dependency>
+      <groupId>${parts[0]}</groupId>
+      <artifactId>${parts[1]}</artifactId>
+      <type>${parts[2]}</type>
+      <classifier>${parts[3]}</classifier>
+      <version>${parts[4]}</version>
+    </dependency>
+EOF
+
+fi
+
+done
+
+cat >> "${outpom}" << EOF
+  </dependencies>
+</project>
+EOF
+}
+
+function get_things {
+  pomfile=$1
+  mvn -f $pomfile dependency:go-offline
+}
